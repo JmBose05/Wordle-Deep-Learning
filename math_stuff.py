@@ -44,9 +44,38 @@ def decode_word(word):
 
     return decoded_word
 
+# input:    dict_tensor (12,972 x 5 x 26) - the dictionary of all valid guesses
+#           known_greens -  list of tuples representing green letters and
+#                           their corresponding indexes - (2,0) - C is green at idx 0
+#           known_greys -   list of integers representing the letters that are known 
+#                           to be grey - [0,1,5] - A, B, & E are known greys
+#           ***letters will only be present in known_greys if they are not already marked 
+#              as green or yellow to handle the double letter edge case***
+#           known_yellows - list of ints corresponding to the known yellow letters
+
 def get_validity_mask(dict_tensor, known_greens, known_greys, known_yellows):
-    mask = torch.ones(dict_tensor.shape[0])
+    # All words are valid (1), mask (12972 x 1)
+    mask = torch.ones(dict_tensor.shape[0], dtype=torch.float32)
+    
+    # Green loop: modify the mask with all of the known green letter positions
     for pos, letter_idx in known_greens:
+        # for every <position, letter> pair, filter out words that do not match
+        mask *= (dict_tensor[:, pos, letter_idx])
+    
+    for pos, letter_id in known_yellows:
+        # remaining valid words must contain the yellow letter and not be at the same position 
+        word_has_letter = (dict_tensor[:, :, letter_idx].sum(dim=1) > 0).float()
+        not_at_curr_pos = (dict_tensor[:, pos, letter_idx] == 0)
+
+        mark *= (word_has_letter & not_at_curr_pos).float() 
+
+    # Grey loop: modify the mask with all of the known grey letters
+    for letter_idx in known_greys:
+        # if the word contains the grey letter, it is invalid
+        word_has_letter = dict_tensor[:, :, letter_idx].sum(dim=1)
+        mask *= (word_has_letter == 0).float()
+
+    return mask
 
 def main():
     # CREATE ENCODED TENSOR AND SAVE IT
@@ -64,13 +93,13 @@ def main():
     data = np.load('wordle_data.npz')
     guess_words = data['guess_words']
     answer_words = data['answer_words']
-    # answer encoded tensor (12972 x 5 x 26)
+    # answer encoded tensor (12,972 x 5 x 26)
     guess_encoded_tensor = data['guess_tensor']
-    # answer encoded tensor (2315 x 5 x 26)
+    # answer encoded tensor (2,315 x 5 x 26)
     answer_encoded_tensor = data['answer_tensor']
     
     # CREATE GAME STATE VECT
-    # represent the state of the game for input into the model to each guess
+    # represent the state of the game for input into the model to make each guess
     # (# of total guesses in a round X # of char for each input X concatenated letter and game state representation)
     # (6 x 5 x 29)
     # first 26 values are the One-Hot letter encoding of one position on the board
